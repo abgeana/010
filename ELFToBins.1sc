@@ -1,0 +1,88 @@
+//------------------------------------------------
+//--- 010 Editor v9.0 Script File
+//
+//      File: ELFToBins.1sc
+//   Authors: AB Geana (@abgeana)
+//   Version: 0.1
+//   Purpose: Extract segments from an ELF file into individual files.
+//  Category: Binary
+//   History:
+//   1.0   AB Geana: Initial release.
+//------------------------------------------------
+
+RequiresVersion(9);
+RequiresFile();
+
+/* Script tested with version 2.5.5 (released 2018-01-28) of the ELF binary template.
+ * The template defines the variable "file" used to refer to the loaded ELF file.
+ */
+RunTemplate("ELF.bt");
+
+// Util functions.
+int Strrchr(char s[], char c) {
+    int len = Strlen(s);
+    int i;
+    for (i = len - 1; i >= 0; i--) {
+        if (s[i] == c)
+            return i;
+    }
+    return i;
+}
+
+string GetFileBaseName() {
+    // The separator must be changed to '\' on Windows.
+    char separator = '/';
+    char name[] = GetFileName();
+    char base_name[50];
+
+    // Copy from after last separator until before dot (if present).
+    int index_begin = Strrchr(name, separator);
+    int index_end = Strrchr(name, '.');
+    if (index_end < index_begin)
+        index_end = Strlen(name);
+
+    // Copy the base name to a new buffer.
+    int i;
+    for (i = index_begin + 1; i < index_end && i - (index_begin +1) < sizeof(base_name) - 1; i++)
+        base_name[i - (index_begin + 1)] = name[i];
+    base_name[i - (index_begin + 1)] = '\0';
+
+    return base_name;
+}
+
+// Variables used throughout the script.
+uint16 e_phnum;
+int i, counter, file_num;
+uint32 p_type;
+uint64 p_filesz;
+char segment_file_name[100];
+
+e_phnum = file.elf_header.e_phnum_NUMBER_OF_PROGRAM_HEADER_ENTRIES;
+file_num = GetFileNum();
+
+// ELF file splitting.
+for (i = 0; i < e_phnum; i++) {
+    p_type = file.program_header_table.program_table_element[i].p_type;
+    p_filesz = file.program_header_table.program_table_element[i].p_filesz_SEGMENT_FILE_LENGTH;
+    if (p_type == PT_LOAD && p_filesz > 0) {
+        counter++;
+        // Generate the name of the new file.
+        SPrintf(
+            segment_file_name,
+            "%02d_%s_%016x",
+            i + 1,
+            GetFileBaseName(),
+            file.program_header_table.program_table_element[i].p_vaddr_VIRTUAL_ADDRESS);
+        // Copy the segment bytes to a new file (via the clipboard).
+        CopyBytesToClipboard(
+            file.program_header_table.program_table_element[i].p_data,
+            p_filesz);
+        FileNew("Hex");
+        PasteFromClipboard();
+        FileSave(segment_file_name);
+        FileClose();
+        FileSelect(file_num);
+    }
+}
+
+MessageBox(idOk, GetScriptName(), "Successfully extracted %d segments. %s", counter, GetFileBaseName());

@@ -1,0 +1,126 @@
+//------------------------------------------------
+//--- 010 Editor v9.0.1 Binary Template
+//
+//      File: FBPK.bt
+//   Authors: AB Geana (@abgeana)
+//   Version: 0.1
+//   Purpose: FBPK Qualcomm bootloader template
+//  Category: Operating System
+// File Mask: bootloader-*.img
+//  ID Bytes: 46 42 50 4B
+//   History:
+//   0.1    2019-04-18 AB Geana: Initial version (partially based on imgtool - http://newandroidbook.com/tools/imgtool.html)
+//------------------------------------------------
+
+#define uint8_t unsigned char
+#define uint16_t unsigned short
+#define uint32_t unsigned int
+#define uint64_t unsigned int64
+
+#define FBPK_MAGIC  "FBPK"
+#define FBPT_MAGIC  0x54504246
+#define ELF_MAGIC   0x464C457F
+
+typedef struct {
+    char        magic[4];
+    uint32_t    version             <comment="Maybe the version of the bootloader image format.">;
+    char        name[0x4C-8];
+    uint32_t    number_parts        <comment="The number of parts inside the image.">;
+    uint32_t    size                <comment="The size of the image in bytes.", format=hex>;
+
+    if (magic != FBPK_MAGIC)
+        Printf("Image file has incorrect magic value.");
+} BootloaderImageHeader_t;
+
+typedef struct {
+    uint32_t    type                <comment=part_type_comment>;
+    char        label[36];
+    uint32_t    size                <comment="The size of the part in the image file.", format=hex>;
+    uint32_t    zero                <comment="Always zero.">;
+    uint32_t    offset_next_part    <comment="Start offset in the image file of the next part (after padding).", format=hex>;
+    uint32_t    checksum            <comment="Maybe part checksum.", format=hex>;
+
+    if (zero != 0)
+        Printf("BootloaderPartHeader_t.zero does not have the value 0.\n");
+} BootloaderPartHeader_t;
+
+typedef struct {
+    uint64_t    size                <comment="The size of the partition in bytes.", format=hex>;
+    uint32_t    unknown             <format=hex>;
+    char        label[36];
+    char        type[37]            <comment="Partition type.">;
+    char        guid[37];
+    char        ascii_zeros[2]      <comment="Always two ASCII '0' characters.">;
+
+    if (ascii_zeros[0] != '0' || ascii_zeros[1] != '0')
+        Printf("BootloaderFBPTEntry_t.ascii_zeros do not have the value '0'.\n");
+} BootloaderFBPTEntry_t;
+
+typedef struct {
+    char        magic[4]            <comment="FBPT part magic.">;
+    uint32_t    one                 <comment="Always one.">;
+    uint32_t    index               <comment="Physical partition index.">;
+    uint32_t    zero                <comment="Always zero.">;
+    uint32_t    number_entries      <comment="The number of entries in the FBPT part payload.">;
+    uint8_t     zero_array[16*2+4];
+    uint32_t    something           <format=hex>;
+
+    local int i;
+    for (i = 0; i < number_entries; i++)
+        BootloaderFBPTEntry_t payload_entries <name="payload entries">;
+
+    if (one != 1)
+        Printf("BootloaderFBPTPayload_t.one does not have the value 1.\n");
+    if (zero != 0)
+        Printf("BootloaderFBPTPayload_t.zero does not have the value 0.\n");
+    for (i = 0; i < sizeof(zero_array); i++)
+        if (zero_array[i] != 0)
+            Printf("BootloaderFBPTPayload_t.zero_array[%d] does not have the value 0.\n", i);
+} BootloaderFBPTPayload_t;
+
+typedef struct BootloaderPartPayload(uint32_t size) {
+    uint8_t data[size];
+} BootloaderPartPayload_t;
+
+typedef struct {
+    BootloaderImageHeader_t image_header <name="image header", comment="Bootloader image header.">;
+
+    local int i;
+    local uint32_t payload_magic;
+    for (i = 0; i < image_header.number_parts; i++) {
+        BootloaderPartHeader_t part_headers <name="part headers">;
+        payload_magic = ReadUInt();
+        if (payload_magic == FBPT_MAGIC)
+            BootloaderFBPTPayload_t part_payloads <name="part payloads", comment="FBPT partition table.">;
+        else
+            BootloaderPartPayload_t part_payloads(part_headers[i].size) <name="part payloads", comment=part_payload_comment>;
+        FSeek(part_headers[i].offset_next_part);
+    }
+} BootloaderImage_t;
+
+string part_type_comment(uint32_t type) {
+    if (type == 0)
+        return "Part type (partition table).";
+    else if (type == 1)
+        return "Part type (file)";
+    else
+        return "Part type (unknown)";
+}
+
+uint32_t read_uint32(uint8_t array[]) {
+    uint32_t result;
+    result =
+        ((uint32_t)array[3] << (3 * 8))   |
+        ((uint32_t)array[2] << (2 * 8))   |
+        ((uint32_t)array[1] << 8)         |
+        array[0];
+    return result;
+}
+
+string part_payload_comment(BootloaderPartPayload_t &part_payload) {
+    if (read_uint32(part_payload.data) == ELF_MAGIC)
+        return "ELF file.";
+    return "Unknown format.";
+}
+
+BootloaderImage_t image <name="image">;

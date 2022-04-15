@@ -1,0 +1,68 @@
+//------------------------------------------------
+//--- 010 Editor v9.0.1 Binary Template
+//
+//      File: sboot.bt
+//   Authors: AB Geana (@abgeana)
+//   Version: 0.1
+//   Purpose: Samsung sboot.bin firmware images
+//  Category: Operating System
+// File Mask: sboot.bin
+//  ID Bytes: -
+//   History:
+//   0.1    2019-11-29 AB Geana: Initial version (partially based on imgtool - http://newandroidbook.com/tools/imgtool.html)
+//------------------------------------------------
+
+#define uint8_t unsigned char
+#define uint16_t unsigned short
+#define uint32_t unsigned int
+#define uint64_t unsigned int64
+
+#define SPKG_MAGIC  "FBPK"
+
+// SPKG sections
+typedef struct {
+    // SPKG header is 0x2b bytes long, including the 4 bytes magic
+    char magic[4];
+    uint32_t len_section                        <comment="Length of section, including magic, excluding signature.", format=hex>;
+    uint32_t val2                               <format=hex>;
+    uint32_t len_name                           <format=hex>;
+    uint32_t val3                               <format=hex>;
+    char name[len_name];
+    uint8_t data[len_section - 20 - len_name];
+    uint8_t signature[112]                      <comment="Possibly ed448 signature.">;
+
+    if (magic != SPKG_MAGIC)
+        Printf("SPKG section has incorrect magic value.");
+} SamsungPackage_t;
+
+/* Offsets taken from Alexander Tarasikov (@astarasikov)
+ * https://allsoftwaresucks.blogspot.com/2019/05/reverse-engineering-samsung-exynos-9820.html
+ *      0x0: probably EPBL (early primitive bootloader) with some USB support
+ *      0x13C00: ACPM (Access Control and Power Management?)
+ *      0x27800: some PM-related code
+ *      0x4CC00: some tables with PM parameters
+ *      ... -> either charger mode code or PMIC firmware
+ *      0xA4000: BL2, the actual s-boot
+ *      0x19E000: TEEGRIS SPKG (CSMC)
+ *      0x19E02B: TEEGRIS SPKG ELF start (cut from here to load into the dissasembler). This probably stands for "Crypto SMC" or "Checkpoint SMC". This handles some SMC calls from the bootloader as part of Secure Boot for Linux.
+ *      0x1ACE00: TEEGRIS SPKG (FP_CSMC)
+ *      0x1ACE2B: TEEGRIS FP_CSMC (ELF header). My guess is that it's related to the Fingerprint sensor because all it does is set some registers in the GPIO block and USI block (whatever it is).
+ *      0x264000: TEEGRIS kernel, relocate to 0xfffffffff0000000 to resolve relocations
+ *      0x29e000: EL1 VBAR for TEEGRIS kernel. fffffffff0041630: syscall table, first entry is zero.
+ *      0x2D4000: startup_loader package
+ *      0x2D4028: startup_loader ELF start. This one's invoked by S-Boot to read the TEEGRIS kernel either from Linux kernel via shared memory or from the LZ4 archive compiled into S-Boot.
+ */
+typedef struct {
+    uint8_t epbl                [0x013C00]              <comment="Early primitive bootloader.">;
+    uint8_t acpm                [0x027800 - 0x013C00]   <comment="Access control and power management.">;
+    uint8_t pm_code             [0x04cc00 - 0x027800]   <comment="Power management related code.">;
+    uint8_t pm_params           [0x0A4000 - 0x04cc00]   <comment="PM parameters or PMIC firmware.">;
+    uint8_t sboot               [0x19E000 - 0x0A4000]   <comment="Bootloader code.">;
+    SamsungPackage_t spkg;
+    SamsungPackage_t spkg;
+    uint8_t noclue              [0x2d8000 - 0x1af3e8];
+    uint8_t header              [0x2d8028 - 0x2d8000];
+    uint8_t next;
+} SbootImage_t;
+
+SbootImage_t image <name="image">;
